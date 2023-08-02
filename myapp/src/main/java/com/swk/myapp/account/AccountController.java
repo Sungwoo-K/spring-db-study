@@ -1,4 +1,4 @@
-package com.kdk.myapp.account;
+package com.swk.myapp.account;
 
 // 서버
 // = 컴퓨터

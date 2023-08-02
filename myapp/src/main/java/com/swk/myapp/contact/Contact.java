@@ -1,4 +1,4 @@
-package com.kdk.myapp.contact;
+package com.swk.myapp.contact;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;

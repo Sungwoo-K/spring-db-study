@@ -1,4 +1,4 @@
-package com.kdk.myapp.post;
+package com.swk.myapp.post;
 
 
 import org.springframework.http.HttpStatus;

@@ -1,4 +1,4 @@
-package com.kdk.myapp.post;
+package com.swk.myapp.post;
 
 import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
