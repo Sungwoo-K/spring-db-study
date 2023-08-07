@@ -1,5 +1,7 @@
 package com.swk.myapp.contact;
 
+import com.swk.myapp.auth.Auth;
+import com.swk.myapp.auth.AuthProfile;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.*;
 import org.springframework.data.repository.query.FluentQuery;
@@ -92,11 +94,14 @@ public class B {
     // ?키=값&키=값....
     // @RequestParam
     // quer-string 값을 매개변수 받는 어노테이션
+    @Auth
     @GetMapping(value = "/paging")
     public Page<Contact> getContactsPaging
-        (@RequestParam int page, @RequestParam int size) {
+        (@RequestParam int page, @RequestParam int size,
+         @RequestAttribute AuthProfile authProfile) {
         System.out.println(page);
         System.out.println(size);
+        System.out.println(authProfile);
 
         // 기본적으로 key 정렬(default)
         // 정렬 설정 없이 간다.
@@ -111,7 +116,8 @@ public class B {
         // LIMIT 10 OFFSET 10: 앞으로 10건을 건너뛰고 다음 10건을 조회
         PageRequest pageRequest = PageRequest.of(page, size, sort);
 
-        return repo.findAll(pageRequest);
+        // 해당 사용자가 소유자인 연락처 목록만 조회
+        return repo.findByOwnerId(authProfile.getId(), pageRequest);
     }
 
     // GET /contacts/paging/searchByName?page=0&size=10&name=hong
@@ -153,13 +159,18 @@ public class B {
     }
 
     // HTTP 1.1 POST /contacts
+    @Auth
     @PostMapping
-    public ResponseEntity<Map<String, Object>> addContact(@RequestBody Contact contact) {
+    public ResponseEntity<Map<String, Object>> addContact
+                            (@RequestBody Contact contact,
+                             @RequestAttribute AuthProfile authProfile) {
         // 클라이언트에서 넘어온 JSON이 객체로 잘 변환됐는지 확인
-        System.out.println(contact.getName());
-        System.out.println(contact.getPhone());
-        System.out.println(contact.getEmail());
+//        System.out.println(contact.getName());
+//        System.out.println(contact.getPhone());
+//        System.out.println(contact.getEmail());
+        System.out.println(authProfile);
 
+        // 1. ------------ 데이터 검증 단계
         // 이메일 필수값 검증
         // 400: bad request
         if(contact.getEmail() == null || contact.getEmail().isEmpty()) {
@@ -178,15 +189,21 @@ public class B {
 
         // 이메일 중복 검증
         // 409: conflict
+        ;
 
 //         JPA Query creation을 사용
-        if(contact.getEmail()!= null && repo.findByEmail(contact.getEmail()).isPresent()) {
+//        if(contact.getEmail()!= null && repo.findByEmail(contact.getEmail()).isPresent()) {
 
 //         Native query를 사용
 //        if(contact.getEmail()!= null && repo.findContactByEmail(contact.getEmail()).isPresent()) {
 
 //         JPA Repository의 기본 인터페이스 메서드를 사용
-//        if(contact.getEmail() != null && repo.findById(contact.getEmail()).isPresent()) {
+
+        // 해당 사용자의 해당 이메일 연락처 있는지를 확인
+        if(contact.getEmail() != null &&
+                repo.findById(
+                new ContactId(authProfile.getId(), contact.getEmail()))
+                        .isPresent()) {
 
             // 맵에 해당 이메일이 있음
             // 이미 있는 데이터를 클라이언트(브라우저) 보냈거나
@@ -198,16 +215,17 @@ public class B {
             return ResponseEntity.status(HttpStatus.CONFLICT).body(res);
         }
 
-//        // 맵에 객체 추가
-//        map.put(contact.getEmail(), contact);
-
+        // 2. --------- 데이터 생성
         // 테이블에 레코드 추가
         // key값이 테이블에 이미 있으면 update
         // 없으면 insert 구문이 실행됨.
 
-        // 생성된 객체를 반환
+        // 생성자의 id를 설정함
+        contact.setOwnerId(authProfile.getId());
+        // 테이블에 저장하고 생성된 객체를 반환
         Contact savedContact = repo.save(contact);
 
+        // 3. --------- 응답 처리
         // 응답 객체 생성(ResponseEntity)
         // 상태코드, 데이터, 메시지
         // 실제로 생성된 레코드(row)를 응답
@@ -227,10 +245,13 @@ public class B {
 
 //    DELETE /contacts/{email}
 //           : Path(경로)Variable(변수)
-//    DELTE /contacts/swkcom@naver.com
+//    DELETE /contacts/swkcom@naver.com
+    @Auth
     @DeleteMapping(value = "/{email}")
     // @PathVariable("email") : 경로 문자열{email}과 변수명 String email이 동일하면 안 써도 된다.
-    public ResponseEntity removeContact(@PathVariable String email) {
+    public ResponseEntity removeContact(
+            @PathVariable String email,
+            @RequestAttribute AuthProfile authProfile) {
         System.out.println(email);
 
         // 해당 키(key)의 데이터가 없으면
@@ -241,22 +262,28 @@ public class B {
 
 //         JPA Repository 기본 메서드 사용
 //        if(!repo.findById(email).isPresent()){
-
 //         Native Query를 이용하여 사용
 //        if(!repo.findContactByEmail(email).isPresent()){
-
 //          Query Creation을 이용하여 사용
-        if(!repo.findByEmail(email).isPresent()){
+//        if(!repo.findByEmail(email).isPresent()){
+
+        Optional<Contact> contact = repo.findById(new ContactId(authProfile.getId(), email));
+        if(!contact.isPresent()){
             // 404: NOT FOUND, 해당 경로에 리소스가 없다.
             // DELETE /contacts/swkcom@naver.com
             // Response Status Code : 404
             return ResponseEntity.status(HttpStatus.NOT_FOUND).build();
         }
 
-//        // 객체(리소스-서버의램) 삭제
-//        map.remove(email);
+        // 해당 연락처의 소유자와 삭제를 요청한 사람의 소유자가 일치하는 확인
+        if(contact.get().getOwnerId() != authProfile.getId()) {
+            // 403: Forbidden, 해당 리소스의 권한이 없다(금지됐다)
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+        }
+
         // 레코드(리소스-데이터베이스의파일일부분) 삭제
-        repo.deleteById(email);
+        repo.deleteById(new ContactId(authProfile.getId(), email));
+
         return ResponseEntity.status(HttpStatus.OK).build();
     }
 
@@ -274,12 +301,14 @@ public class B {
     @PutMapping(value = "/{email}")
     public ResponseEntity modifyContact
             (@PathVariable String email,
-             @RequestBody ContactModifyRequest contact) {
+             @RequestBody ContactModifyRequest contact,
+             @RequestAttribute AuthProfile authProfile) {
         System.out.println(email);
         System.out.println(contact);
         
         // 1. 키값으로 조회해옴
-        Optional<Contact> findedContact = repo.findById(email);
+        Optional<Contact> findedContact =
+                repo.findById(new ContactId(authProfile.getId(),email));
         
         // 2. 해당 레코드가 있는지 확인
         if(!findedContact.isPresent()){
